@@ -8,10 +8,27 @@ function requireTrustedOrigin(request, response, next) {
     return next();
   }
 
-  if (request.get("origin") !== environment.FRONTEND_ORIGIN) {
-    return sendFailure(response, 403, "Origin tidak diizinkan");
+  const origin = request.get("origin");
+  if (!origin) {
+    return next();
   }
-  return next();
+
+  const allowedOrigins = [
+    environment.FRONTEND_ORIGIN,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://be-tbg.onrender.com",
+  ];
+
+  if (
+    allowedOrigins.includes(origin) ||
+    origin.endsWith(".vercel.app") ||
+    origin.endsWith(".onrender.com")
+  ) {
+    return next();
+  }
+
+  return sendFailure(response, 403, `Origin ${origin} tidak diizinkan`);
 }
 
 function requireCsrf(request, response, next) {
