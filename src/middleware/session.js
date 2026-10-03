@@ -7,10 +7,11 @@ const REFRESH_COOKIE = "simpanku_refresh";
 const CSRF_COOKIE = "simpanku_csrf";
 
 function cookieOptions(httpOnly, maxAge) {
+  const isProduction = process.env.NODE_ENV === "production";
   return {
     httpOnly,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
     path: "/",
     maxAge,
   };
