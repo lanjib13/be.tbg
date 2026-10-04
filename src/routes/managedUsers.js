@@ -191,8 +191,17 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     throw new AppError(500, "Akun autentikasi pengguna gagal dihapus");
   }
 
-  // Optional: delete from profiles if auth deletion doesn't cascade
-  await admin.from("profiles").delete().eq("id", id);
+  const { error: txError } = await admin.from("transactions").delete().eq("user_id", id);
+  if (txError) throw new AppError(500, "Gagal menghapus riwayat transaksi: " + txError.message);
+
+  const { error: savingsError } = await admin.from("savings").delete().eq("user_id", id);
+  if (savingsError) throw new AppError(500, "Gagal menghapus data tabungan: " + savingsError.message);
+
+  const { error: detailsError } = await admin.from("user_profiles").delete().eq("profile_id", id);
+  if (detailsError) throw new AppError(500, "Gagal menghapus detail pengguna: " + detailsError.message);
+
+  const { error: profileDeleteError } = await admin.from("profiles").delete().eq("id", id);
+  if (profileDeleteError) throw new AppError(500, "Gagal menghapus profil: " + profileDeleteError.message);
   
   await admin.from("audit_logs").insert({
     user_id: request.profile.id,

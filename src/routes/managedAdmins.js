@@ -150,7 +150,14 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     throw new AppError(500, "Akun autentikasi Admin gagal dihapus");
   }
 
-  await admin.from("profiles").delete().eq("id", id);
+  const { error: txError } = await admin.from("transactions").update({ admin_id: null }).eq("admin_id", id);
+  if (txError) throw new AppError(500, "Gagal memperbarui riwayat transaksi admin: " + txError.message);
+
+  const { error: detailsError } = await admin.from("user_profiles").delete().eq("profile_id", id);
+  if (detailsError) throw new AppError(500, "Gagal menghapus detail admin: " + detailsError.message);
+
+  const { error: profileDeleteError } = await admin.from("profiles").delete().eq("id", id);
+  if (profileDeleteError) throw new AppError(500, "Gagal menghapus profil admin: " + profileDeleteError.message);
   
   await admin.from("audit_logs").insert({
     user_id: request.profile.id,
