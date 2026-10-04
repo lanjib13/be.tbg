@@ -133,15 +133,34 @@ router.patch("/:id/status", validate(statusSchema), asyncRoute(async (request, r
 
 router.delete("/:id", asyncRoute(async (request, response) => {
   const id = z.string().uuid().parse(request.params.id);
-  const { data, error } = await getSupabaseAdminClient().rpc("set_managed_profile_status", {
-    p_actor_profile_id: request.profile.id,
-    p_target_profile_id: id,
-    p_status: "inactive",
-    p_ip_address: request.ip ?? null,
-    p_user_agent: request.get("user-agent") ?? null,
+  const admin = getSupabaseAdminClient();
+  
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("auth_user_id, username")
+    .eq("id", id)
+    .single();
+
+  if (profileError || !profile) {
+    throw new AppError(404, "Admin tidak ditemukan");
+  }
+
+  const { error: authDeleteError } = await admin.auth.admin.deleteUser(profile.auth_user_id);
+  if (authDeleteError) {
+    throw new AppError(500, "Akun autentikasi Admin gagal dihapus");
+  }
+
+  await admin.from("profiles").delete().eq("id", id);
+  
+  await admin.from("audit_logs").insert({
+    user_id: request.profile.id,
+    action: "DELETE_ADMIN",
+    description: `Super Admin ${request.profile.username} menghapus Admin ${profile.username} secara permanen.`,
+    ip_address: request.ip ?? null,
+    user_agent: request.get("user-agent") ?? null,
   });
-  if (error) mapDatabaseError(error, "Admin gagal dinonaktifkan");
-  return sendSuccess(response, "Admin berhasil dinonaktifkan", data);
+
+  return sendSuccess(response, "Admin berhasil dihapus permanen");
 }));
 
 router.post("/:id/reset-password", validate(resetSchema), asyncRoute(async (request, response) => {
