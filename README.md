@@ -14,3 +14,5 @@ Salin `.env.example` ke `.env` hanya bila perlu; `.env` yang sudah dikonfigurasi
 
 
 API base URL lokal: `http://localhost:4000/api`. Health check: `/health`.
+
+DELETE pengguna bersifat permanen: setelah konfirmasi, RPC menghapus profil, detail, rekening/saldo, dan transaksi serta mencatat audit `DELETE_USER`; backend kemudian menghapus akun Supabase Auth. Operasi tidak dapat dibatalkan. Pastikan migration `202610070001_permanent_user_delete.sql` sudah diterapkan ke Supabase sebelum memakai aksi ini.

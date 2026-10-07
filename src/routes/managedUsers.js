@@ -175,15 +175,28 @@ router.patch("/:id/status", validate(statusSchema), asyncRoute(async (request, r
 
 router.delete("/:id", asyncRoute(async (request, response) => {
   const id = z.string().uuid().parse(request.params.id);
-  const { data, error } = await getSupabaseAdminClient().rpc("set_managed_profile_status", {
+  const admin = getSupabaseAdminClient();
+  const { data, error } = await admin.rpc("delete_managed_user", {
     p_actor_profile_id: request.profile.id,
     p_target_profile_id: id,
-    p_status: "inactive",
     p_ip_address: request.ip ?? null,
     p_user_agent: request.get("user-agent") ?? null,
   });
-  if (error) mapDatabaseError(error, "Pengguna gagal dihapus");
-  return sendSuccess(response, "Pengguna dihapus dari daftar aktif; riwayat dan saldo tetap tersimpan", data);
+  if (error) mapDatabaseError(error, "Pengguna gagal dihapus permanen");
+
+  const deletedUser = Array.isArray(data) ? data[0] : data;
+  if (!deletedUser?.auth_user_id) throw new AppError(500, "Data aplikasi terhapus, tetapi identitas Auth tidak ditemukan");
+
+  const { error: authDeleteError } = await admin.auth.admin.deleteUser(deletedUser.auth_user_id);
+  if (authDeleteError) {
+    console.error("Auth account cleanup failed after permanent user deletion", {
+      profileId: id,
+      authErrorCode: authDeleteError.code ?? "unknown",
+    });
+    throw new AppError(502, "Data pengguna sudah dihapus, tetapi akun Auth belum berhasil dibersihkan");
+  }
+
+  return sendSuccess(response, "Pengguna, rekening, saldo, transaksi, dan akun Auth berhasil dihapus permanen", {});
 }));
 
 router.post("/:id/reset-password", validate(resetPasswordSchema), asyncRoute(async (request, response) => {

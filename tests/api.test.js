@@ -42,6 +42,10 @@ test("mutations reject untrusted origins before session checks", async () => {
 
 test("role-managed routes reject requests without a session", async () => {
   await request(app).get("/api/admin/users").expect(401);
+  await request(app)
+    .delete("/api/admin/users/00000000-0000-4000-8000-000000000001")
+    .set("Origin", "http://localhost:3000")
+    .expect(401);
   await request(app).get("/api/super-admin/admins").expect(401);
   await request(app)
     .post("/api/transactions/deposit")
