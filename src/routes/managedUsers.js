@@ -32,6 +32,7 @@ const listSchema = z.object({
 function mapDatabaseError(error, fallback) {
   if (error?.code === "23505") throw new AppError(409, "Username atau nomor identitas sudah digunakan");
   if (error?.code === "42501") throw new AppError(403, "Operasi ini tidak diizinkan untuk akun Anda");
+  if (error?.code === "P0002") throw new AppError(404, "Pengguna tidak ditemukan");
   if (error?.code === "PGRST202") throw new AppError(503, "Migration database terbaru belum diterapkan");
   throw new AppError(400, fallback);
 }
@@ -174,44 +175,15 @@ router.patch("/:id/status", validate(statusSchema), asyncRoute(async (request, r
 
 router.delete("/:id", asyncRoute(async (request, response) => {
   const id = z.string().uuid().parse(request.params.id);
-  const admin = getSupabaseAdminClient();
-  
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("auth_user_id, username")
-    .eq("id", id)
-    .single();
-
-  if (profileError || !profile) {
-    throw new AppError(404, "Pengguna tidak ditemukan");
-  }
-
-  const { error: authDeleteError } = await admin.auth.admin.deleteUser(profile.auth_user_id);
-  if (authDeleteError) {
-    throw new AppError(500, "Akun autentikasi pengguna gagal dihapus");
-  }
-
-  const { error: txError } = await admin.from("transactions").delete().eq("user_id", id);
-  if (txError) throw new AppError(500, "Gagal menghapus riwayat transaksi: " + txError.message);
-
-  const { error: savingsError } = await admin.from("savings").delete().eq("user_id", id);
-  if (savingsError) throw new AppError(500, "Gagal menghapus data tabungan: " + savingsError.message);
-
-  const { error: detailsError } = await admin.from("user_profiles").delete().eq("profile_id", id);
-  if (detailsError) throw new AppError(500, "Gagal menghapus detail pengguna: " + detailsError.message);
-
-  const { error: profileDeleteError } = await admin.from("profiles").delete().eq("id", id);
-  if (profileDeleteError) throw new AppError(500, "Gagal menghapus profil: " + profileDeleteError.message);
-  
-  await admin.from("audit_logs").insert({
-    user_id: request.profile.id,
-    action: "DELETE_USER",
-    description: `Admin ${request.profile.username} menghapus pengguna ${profile.username} secara permanen.`,
-    ip_address: request.ip ?? null,
-    user_agent: request.get("user-agent") ?? null,
+  const { data, error } = await getSupabaseAdminClient().rpc("set_managed_profile_status", {
+    p_actor_profile_id: request.profile.id,
+    p_target_profile_id: id,
+    p_status: "inactive",
+    p_ip_address: request.ip ?? null,
+    p_user_agent: request.get("user-agent") ?? null,
   });
-
-  return sendSuccess(response, "Pengguna dan saldonya berhasil dihapus permanen");
+  if (error) mapDatabaseError(error, "Pengguna gagal dihapus");
+  return sendSuccess(response, "Pengguna dihapus dari daftar aktif; riwayat dan saldo tetap tersimpan", data);
 }));
 
 router.post("/:id/reset-password", validate(resetPasswordSchema), asyncRoute(async (request, response) => {

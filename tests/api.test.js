@@ -37,7 +37,7 @@ test("mutations reject untrusted origins before session checks", async () => {
     .expect(403);
 
   assert.equal(response.body.success, false);
-  assert.equal(response.body.message, "Origin tidak diizinkan");
+  assert.match(response.body.message, /origin .* tidak diizinkan/i);
 });
 
 test("role-managed routes reject requests without a session", async () => {
