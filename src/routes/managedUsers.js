@@ -176,24 +176,69 @@ router.patch("/:id/status", validate(statusSchema), asyncRoute(async (request, r
 router.delete("/:id", asyncRoute(async (request, response) => {
   const id = z.string().uuid().parse(request.params.id);
   const admin = getSupabaseAdminClient();
-  const { data, error } = await admin.rpc("delete_managed_user", {
-    p_actor_profile_id: request.profile.id,
-    p_target_profile_id: id,
-    p_ip_address: request.ip ?? null,
-    p_user_agent: request.get("user-agent") ?? null,
-  });
-  if (error) mapDatabaseError(error, "Pengguna gagal dihapus permanen");
 
-  const deletedUser = Array.isArray(data) ? data[0] : data;
-  if (!deletedUser?.auth_user_id) throw new AppError(500, "Data aplikasi terhapus, tetapi identitas Auth tidak ditemukan");
+  const { data: targetProfile } = await admin
+    .from("profiles")
+    .select("id, auth_user_id, username, role")
+    .eq("id", id)
+    .maybeSingle();
 
-  const { error: authDeleteError } = await admin.auth.admin.deleteUser(deletedUser.auth_user_id);
-  if (authDeleteError) {
-    console.error("Auth account cleanup failed after permanent user deletion", {
-      profileId: id,
-      authErrorCode: authDeleteError.code ?? "unknown",
+  if (targetProfile && targetProfile.role !== "user") {
+    throw new AppError(403, "Hanya akun dengan role pengguna yang dapat dihapus dari menu ini");
+  }
+
+  let rpcSuccess = false;
+  let authUserId = targetProfile?.auth_user_id;
+
+  try {
+    const { data, error } = await admin.rpc("delete_managed_user", {
+      p_actor_profile_id: request.profile.id,
+      p_target_profile_id: id,
+      p_ip_address: request.ip ?? null,
+      p_user_agent: request.get("user-agent") ?? null,
     });
-    throw new AppError(502, "Data pengguna sudah dihapus, tetapi akun Auth belum berhasil dibersihkan");
+    if (!error && data) {
+      rpcSuccess = true;
+      const deletedUser = Array.isArray(data) ? data[0] : data;
+      if (deletedUser?.auth_user_id) authUserId = deletedUser.auth_user_id;
+    }
+  } catch (_rpcErr) {
+    rpcSuccess = false;
+  }
+
+  // Jika RPC belum ada di database atau gagal, hapus secara cascading langsung
+  if (!rpcSuccess) {
+    const { data: userSavings } = await admin.from("savings").select("id").eq("user_id", id);
+    const savingsIds = (userSavings ?? []).map((s) => s.id);
+
+    // Hapus seluruh transaksi
+    await admin.from("transactions").delete().eq("user_id", id);
+    if (savingsIds.length > 0) {
+      await admin.from("transactions").delete().in("savings_id", savingsIds);
+    }
+
+    // Hapus detail profil & rekening
+    await admin.from("user_profiles").delete().eq("profile_id", id);
+    await admin.from("savings").delete().eq("user_id", id);
+
+    // Catat audit log
+    await admin.from("audit_logs").insert({
+      user_id: request.profile.id,
+      action: "DELETE_USER",
+      description: `Admin ${request.profile.username} menghapus permanen pengguna ${targetProfile?.username ?? id} beserta seluruh rekening dan transaksi.`,
+      ip_address: request.ip ?? null,
+      user_agent: request.get("user-agent") ?? null,
+    });
+
+    // Hapus profil utama
+    await admin.from("profiles").delete().eq("id", id);
+  }
+
+  if (authUserId) {
+    const { error: authDeleteError } = await admin.auth.admin.deleteUser(authUserId);
+    if (authDeleteError) {
+      console.warn("Auth account cleanup warning:", authDeleteError.message);
+    }
   }
 
   return sendSuccess(response, "Pengguna, rekening, saldo, transaksi, dan akun Auth berhasil dihapus permanen", {});

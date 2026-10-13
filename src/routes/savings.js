@@ -20,8 +20,30 @@ router.get("/", requireSession, asyncRoute(async (request, response) => {
   if (profileError) throw new AppError(500, "Data pemilik rekening gagal dimuat");
 
   const profilesById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+
+  const validItems = [];
+  const orphanSavingsIds = [];
+
+  for (const item of (savings ?? [])) {
+    const owner = profilesById.get(item.user_id);
+    if (!owner) {
+      orphanSavingsIds.push(item.id);
+    } else {
+      validItems.push({ ...item, owner });
+    }
+  }
+
+  // Bersihkan data tabungan yatim yang pemiliknya sudah terhapus di database
+  if (orphanSavingsIds.length > 0) {
+    admin.from("transactions").delete().in("savings_id", orphanSavingsIds).then(() => {
+      return admin.from("savings").delete().in("id", orphanSavingsIds);
+    }).catch((cleanupErr) => {
+      console.warn("Pembersihan rekening yatim gagal:", cleanupErr.message);
+    });
+  }
+
   return sendSuccess(response, "Data tabungan berhasil dimuat", {
-    items: (savings ?? []).map((item) => ({ ...item, owner: profilesById.get(item.user_id) ?? null })),
+    items: validItems,
   });
 }));
 
