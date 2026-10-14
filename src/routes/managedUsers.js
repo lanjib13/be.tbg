@@ -223,14 +223,19 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     const savingsIds = (userSavings ?? []).map((s) => s.id);
 
     // Hapus seluruh transaksi
-    await admin.from("transactions").delete().eq("user_id", id);
+    const { error: txErr } = await admin.from("transactions").delete().eq("user_id", id);
+    if (txErr) mapDatabaseError(txErr, "Gagal menghapus riwayat transaksi pengguna");
     if (savingsIds.length > 0) {
-      await admin.from("transactions").delete().in("savings_id", savingsIds);
+      const { error: txSavErr } = await admin.from("transactions").delete().in("savings_id", savingsIds);
+      if (txSavErr) mapDatabaseError(txSavErr, "Gagal menghapus riwayat transaksi tabungan");
     }
 
     // Hapus detail profil & rekening
-    await admin.from("user_profiles").delete().eq("profile_id", id);
-    await admin.from("savings").delete().eq("user_id", id);
+    const { error: upErr } = await admin.from("user_profiles").delete().eq("profile_id", id);
+    if (upErr) mapDatabaseError(upErr, "Gagal menghapus profil santri");
+
+    const { error: savErr } = await admin.from("savings").delete().eq("user_id", id);
+    if (savErr) mapDatabaseError(savErr, "Gagal menghapus rekening pengguna");
 
     // Catat audit log
     await admin.from("audit_logs").insert({
@@ -242,7 +247,8 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     });
 
     // Hapus profil utama
-    await admin.from("profiles").delete().eq("id", id);
+    const { error: profErr } = await admin.from("profiles").delete().eq("id", id);
+    if (profErr) mapDatabaseError(profErr, "Gagal menghapus profil pengguna");
   }
 
   // Bersihkan akun Auth jika masih tersisa (bisa jadi sudah terhapus oleh trigger database)

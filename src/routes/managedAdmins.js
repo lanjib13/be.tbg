@@ -170,8 +170,10 @@ router.delete("/:id", asyncRoute(async (request, response) => {
 
   if (!rpcSuccess) {
     // Putuskan relasi admin_id di transactions agar riwayat transaksi tetap aman
-    await admin.from("transactions").update({ admin_id: null }).eq("admin_id", id);
-    await admin.from("user_profiles").delete().eq("profile_id", id);
+    const { error: txUpdErr } = await admin.from("transactions").update({ admin_id: null }).eq("admin_id", id);
+    if (txUpdErr) mapDatabaseError(txUpdErr, "Gagal melepaskan relasi admin pada transaksi");
+    const { error: upErr } = await admin.from("user_profiles").delete().eq("profile_id", id);
+    if (upErr) mapDatabaseError(upErr, "Gagal menghapus detail profil admin");
     
     // Catat audit log sebelum profil dihapus
     await admin.from("audit_logs").insert({
@@ -182,7 +184,8 @@ router.delete("/:id", asyncRoute(async (request, response) => {
       user_agent: request.get("user-agent") ?? null,
     });
 
-    await admin.from("profiles").delete().eq("id", id);
+    const { error: profErr } = await admin.from("profiles").delete().eq("id", id);
+    if (profErr) mapDatabaseError(profErr, "Gagal menghapus profil admin");
   }
 
   if (authUserId) {
