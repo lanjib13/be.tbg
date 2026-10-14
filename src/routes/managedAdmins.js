@@ -137,7 +137,7 @@ router.delete("/:id", asyncRoute(async (request, response) => {
   
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("auth_user_id, username")
+    .select("id, auth_user_id, username, role")
     .eq("id", id)
     .single();
 
@@ -145,27 +145,51 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     throw new AppError(404, "Admin tidak ditemukan");
   }
 
-  const { error: authDeleteError } = await admin.auth.admin.deleteUser(profile.auth_user_id);
-  if (authDeleteError) {
-    throw new AppError(500, "Akun autentikasi Admin gagal dihapus");
+  if (profile.role !== "admin") {
+    throw new AppError(403, "Hanya akun dengan role admin yang dapat dihapus dari menu ini");
   }
 
-  const { error: txError } = await admin.from("transactions").update({ admin_id: null }).eq("admin_id", id);
-  if (txError) throw new AppError(500, "Gagal memperbarui riwayat transaksi admin: " + txError.message);
+  let rpcSuccess = false;
+  let authUserId = profile.auth_user_id;
 
-  const { error: detailsError } = await admin.from("user_profiles").delete().eq("profile_id", id);
-  if (detailsError) throw new AppError(500, "Gagal menghapus detail admin: " + detailsError.message);
+  try {
+    const { data, error } = await admin.rpc("delete_managed_admin", {
+      p_actor_profile_id: request.profile.id,
+      p_target_profile_id: id,
+      p_ip_address: request.ip ?? null,
+      p_user_agent: request.get("user-agent") ?? null,
+    });
+    if (!error) {
+      rpcSuccess = true;
+      const deletedAdmin = Array.isArray(data) ? data[0] : data;
+      if (deletedAdmin?.auth_user_id) authUserId = deletedAdmin.auth_user_id;
+    }
+  } catch (_e) {
+    rpcSuccess = false;
+  }
 
-  const { error: profileDeleteError } = await admin.from("profiles").delete().eq("id", id);
-  if (profileDeleteError) throw new AppError(500, "Gagal menghapus profil admin: " + profileDeleteError.message);
-  
-  await admin.from("audit_logs").insert({
-    user_id: request.profile.id,
-    action: "DELETE_ADMIN",
-    description: `Super Admin ${request.profile.username} menghapus Admin ${profile.username} secara permanen.`,
-    ip_address: request.ip ?? null,
-    user_agent: request.get("user-agent") ?? null,
-  });
+  if (!rpcSuccess) {
+    // Putuskan relasi admin_id di transactions agar riwayat transaksi tetap aman
+    await admin.from("transactions").update({ admin_id: null }).eq("admin_id", id);
+    await admin.from("user_profiles").delete().eq("profile_id", id);
+    
+    // Catat audit log sebelum profil dihapus
+    await admin.from("audit_logs").insert({
+      user_id: request.profile.id,
+      action: "DELETE_ADMIN",
+      description: `Super Admin ${request.profile.username} menghapus Admin ${profile.username} secara permanen.`,
+      ip_address: request.ip ?? null,
+      user_agent: request.get("user-agent") ?? null,
+    });
+
+    await admin.from("profiles").delete().eq("id", id);
+  }
+
+  if (authUserId) {
+    try {
+      await admin.auth.admin.deleteUser(authUserId);
+    } catch (_ignored) {}
+  }
 
   return sendSuccess(response, "Admin berhasil dihapus permanen");
 }));

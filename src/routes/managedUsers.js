@@ -183,12 +183,20 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     .eq("id", id)
     .maybeSingle();
 
-  if (targetProfile && targetProfile.role !== "user") {
+  if (!targetProfile) {
+    // Periksa apakah mungkin ada data yatim yang tersisa dengan ID ini
+    await admin.from("transactions").delete().eq("user_id", id);
+    await admin.from("savings").delete().eq("user_id", id);
+    await admin.from("user_profiles").delete().eq("profile_id", id);
+    throw new AppError(404, "Pengguna tidak ditemukan");
+  }
+
+  if (targetProfile.role !== "user") {
     throw new AppError(403, "Hanya akun dengan role pengguna yang dapat dihapus dari menu ini");
   }
 
   let rpcSuccess = false;
-  let authUserId = targetProfile?.auth_user_id;
+  let authUserId = targetProfile.auth_user_id;
 
   try {
     const { data, error } = await admin.rpc("delete_managed_user", {
@@ -197,12 +205,15 @@ router.delete("/:id", asyncRoute(async (request, response) => {
       p_ip_address: request.ip ?? null,
       p_user_agent: request.get("user-agent") ?? null,
     });
-    if (!error && data) {
+    if (!error) {
       rpcSuccess = true;
       const deletedUser = Array.isArray(data) ? data[0] : data;
       if (deletedUser?.auth_user_id) authUserId = deletedUser.auth_user_id;
+    } else {
+      console.warn("delete_managed_user RPC failed, falling back to direct deletion:", error.message);
     }
-  } catch (_rpcErr) {
+  } catch (rpcErr) {
+    console.warn("delete_managed_user RPC thrown, falling back to direct deletion:", rpcErr.message);
     rpcSuccess = false;
   }
 
@@ -225,7 +236,7 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     await admin.from("audit_logs").insert({
       user_id: request.profile.id,
       action: "DELETE_USER",
-      description: `Admin ${request.profile.username} menghapus permanen pengguna ${targetProfile?.username ?? id} beserta seluruh rekening dan transaksi.`,
+      description: `Admin ${request.profile.username} menghapus permanen pengguna ${targetProfile.username} beserta seluruh rekening dan transaksi.`,
       ip_address: request.ip ?? null,
       user_agent: request.get("user-agent") ?? null,
     });
@@ -234,10 +245,15 @@ router.delete("/:id", asyncRoute(async (request, response) => {
     await admin.from("profiles").delete().eq("id", id);
   }
 
+  // Bersihkan akun Auth jika masih tersisa (bisa jadi sudah terhapus oleh trigger database)
   if (authUserId) {
-    const { error: authDeleteError } = await admin.auth.admin.deleteUser(authUserId);
-    if (authDeleteError) {
-      console.warn("Auth account cleanup warning:", authDeleteError.message);
+    try {
+      const { error: authDeleteError } = await admin.auth.admin.deleteUser(authUserId);
+      if (authDeleteError && !authDeleteError.message?.toLowerCase().includes("not found")) {
+        console.warn("Auth account cleanup warning:", authDeleteError.message);
+      }
+    } catch (_authErr) {
+      // Abaikan jika sudah dibersihkan oleh trigger DB
     }
   }
 

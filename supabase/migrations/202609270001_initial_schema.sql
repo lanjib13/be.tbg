@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE TABLE public.profiles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  auth_user_id uuid NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE RESTRICT,
+  auth_user_id uuid NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE,
   name text NOT NULL CHECK (btrim(name) <> ''),
   username text NOT NULL CHECK (
     username = lower(username)
@@ -22,7 +22,7 @@ CREATE INDEX profiles_role_status_idx
 
 CREATE TABLE public.user_profiles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  profile_id uuid NOT NULL UNIQUE REFERENCES public.profiles (id) ON DELETE RESTRICT,
+  profile_id uuid NOT NULL UNIQUE REFERENCES public.profiles (id) ON DELETE CASCADE,
   nomor_identitas text NOT NULL UNIQUE CHECK (btrim(nomor_identitas) <> ''),
   no_hp text NOT NULL CHECK (btrim(no_hp) <> ''),
   alamat text NOT NULL CHECK (btrim(alamat) <> ''),
@@ -33,7 +33,7 @@ CREATE TABLE public.user_profiles (
 
 CREATE TABLE public.savings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL UNIQUE REFERENCES public.profiles (id) ON DELETE RESTRICT,
+  user_id uuid NOT NULL UNIQUE REFERENCES public.profiles (id) ON DELETE CASCADE,
   nomor_rekening text NOT NULL UNIQUE,
   saldo numeric(18, 0) NOT NULL DEFAULT 0 CHECK (saldo >= 0),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
@@ -48,8 +48,8 @@ CREATE INDEX savings_status_user_id_idx
 CREATE TABLE public.transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   savings_id uuid NOT NULL,
-  user_id uuid NOT NULL REFERENCES public.profiles (id) ON DELETE RESTRICT,
-  admin_id uuid NOT NULL REFERENCES public.profiles (id) ON DELETE RESTRICT,
+  user_id uuid NOT NULL REFERENCES public.profiles (id) ON DELETE CASCADE,
+  admin_id uuid REFERENCES public.profiles (id) ON DELETE SET NULL,
   transaction_code text NOT NULL UNIQUE,
   type text NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
   amount numeric(18, 0) NOT NULL CHECK (amount > 0),
@@ -62,7 +62,7 @@ CREATE TABLE public.transactions (
   CONSTRAINT transactions_savings_owner_fk
     FOREIGN KEY (savings_id, user_id)
     REFERENCES public.savings (id, user_id)
-    ON DELETE RESTRICT,
+    ON DELETE CASCADE,
   CONSTRAINT transactions_balance_math_check CHECK (
     (type = 'deposit' AND balance_after = balance_before + amount)
     OR (type = 'withdrawal' AND balance_after = balance_before - amount)
